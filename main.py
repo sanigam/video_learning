@@ -20,8 +20,8 @@ load_dotenv()
 
 # Page configuration
 st.set_page_config(
-    page_title="AI-Enhanced Video Learning Platform",
-    page_icon="🎓",
+    page_title="CognitoStream: AI-Enhanced Video Learning Platform",
+    page_icon="logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -137,10 +137,12 @@ def main():
         initial_page = st.session_state.get("navigation_value", "Video Processing")
     
     # Display header
-    st.markdown("<div class='main-header'>AI-Enhanced Video Learning Platform</div>", unsafe_allow_html=True)
+    st.markdown("<div class='main-header'>CognitoStream: AI-Enhanced Video Learning Platform</div>", unsafe_allow_html=True)
     
     # Sidebar for navigation and user settings
     with st.sidebar:
+        #put logo at the top
+        st.image("logo.png", width=200)
         st.markdown("<div class='section-header'>Navigation</div>", unsafe_allow_html=True)
         
         # Navigation options
