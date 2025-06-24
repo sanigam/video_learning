@@ -3,6 +3,13 @@ import os
 import requests
 from pytube import YouTube
 from youtube_transcript_api import YouTubeTranscriptApi
+from dotenv import load_dotenv
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.google_adk_manager import GoogleADKManager
+
+# Load environment variables
+load_dotenv()
 
 # Configure requests with custom headers
 HEADERS = {
@@ -13,7 +20,17 @@ HEADERS = {
 class VideoProcessor:
     def __init__(self):
         """Initialize the VideoProcessor class."""
-        pass
+        try:
+            self.gemini_manager = GoogleADKManager()
+        except Exception as e:
+            print(f"Warning: Could not initialize Gemini manager: {e}")
+            self.gemini_manager = None
+        
+        # Path to the sample transcript file
+        self.sample_transcript_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+            'sample_transcript_clean.txt'
+        )
         
     def extract_video_id(self, url):
         """
@@ -33,6 +50,21 @@ class VideoProcessor:
             return match.group(1)
         else:
             raise ValueError("Invalid YouTube URL. Please provide a valid YouTube video URL.")
+    
+    def load_sample_transcript(self):
+        """
+        Load the sample transcript from file.
+        
+        Returns:
+            str: Sample transcript content
+        """
+        try:
+            with open(self.sample_transcript_path, 'r', encoding='utf-8') as file:
+                return file.read().strip()
+        except Exception as e:
+            print(f"Error loading sample transcript: {e}")
+            # Fallback hardcoded sample
+            return "This is a sample transcript about artificial intelligence and machine learning technologies. AI and ML are transforming how we interact with technology and solve complex problems. Machine learning enables systems to learn from data and improve over time without explicit programming."
     
     def get_video_info(self, video_id):
         """
@@ -76,7 +108,10 @@ class VideoProcessor:
         
     def extract_transcript(self, video_id):
         """
-        Extract transcript from a YouTube video.
+        Extract transcript from a YouTube video using a three-tier fallback system:
+        1. YouTubeTranscriptApi (most reliable)
+        2. Gemini AI transcription (fallback)
+        3. Sample transcript (demo fallback)
         
         Args:
             video_id (str): YouTube video ID
@@ -96,75 +131,53 @@ class VideoProcessor:
 
         print(f"Attempting to get transcript for video ID: {video_id}", flush=True)
         
-        # First try YouTubeTranscriptApi as it's more reliable
+        # Tier 1: Try YouTubeTranscriptApi (most reliable and fast)
         try:
-            print("Trying YouTubeTranscriptApi...", flush=True)
+            print("Tier 1: Trying YouTubeTranscriptApi...", flush=True)
             transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
             if transcript_list:
-                return ' '.join(entry['text'] for entry in transcript_list)
+                transcript = ' '.join(entry['text'] for entry in transcript_list)
+                if transcript and len(transcript.strip()) > 50:  # Ensure meaningful content
+                    print("✓ Successfully extracted transcript using YouTubeTranscriptApi", flush=True)
+                    return transcript
         except Exception as e:
-            print(f"YouTubeTranscriptApi error: {str(e)}", flush=True)
+            print(f"✗ YouTubeTranscriptApi failed: {str(e)}", flush=True)
         
-        # If that fails, try PyTube
+        # Tier 2: Try Gemini AI transcription (slower but more capable)
+        if self.gemini_manager:
+            try:
+                print("Tier 2: Trying Gemini AI transcription...", flush=True)
+                transcript = self.gemini_manager.transcribe_youtube_video(video_id)
+                
+                # Check if Gemini returned a valid transcript
+                if transcript and not transcript.startswith("Failed to transcribe") and len(transcript.strip()) > 50:
+                    print("✓ Successfully extracted transcript using Gemini AI", flush=True)
+                    return transcript
+                else:
+                    print("✗ Gemini AI returned insufficient transcript content", flush=True)
+            except Exception as e:
+                print(f"✗ Gemini AI transcription failed: {str(e)}", flush=True)
+        else:
+            print("✗ Gemini manager not available", flush=True)
+        
+        # Tier 3: Use sample transcript for demonstration purposes
         try:
-            print("Trying PyTube...", flush=True)
-            session = requests.Session()
-            session.headers.update(HEADERS)
-            yt = YouTube(
-                url=f'https://www.youtube.com/watch?v={video_id}',
-                use_oauth=False,
-                allow_oauth_cache=True
-            )
-            yt.use_oauth = False
-            yt.allow_oauth_cache = True
+            print("Tier 3: Using sample transcript for demonstration...", flush=True)
+            sample_transcript = self.load_sample_transcript()
             
-            if not yt.captions:
-                print("No captions available", flush=True)
-                return "No captions available for this video"
-                
-            caption = None
-            # Try to get English captions
-            if 'en' in yt.captions:
-                caption = yt.captions['en']
-            elif 'a.en' in yt.captions:  # Try auto-generated English
-                caption = yt.captions['a.en']
-                
-            if caption:
-                transcript = caption.generate_srt_captions()
-                return clean_transcript(transcript)
-                
-            return "No English transcript available for this video"
-                
-        except Exception as e:
-            error_message = str(e)
-            print(f"PyTube error: {error_message}", flush=True)
-            
-            if "HTTP Error 400" in error_message:
-                return "Unable to access video. The video might be private or restricted."
-            elif "Video unavailable" in error_message:
-                return "This video is unavailable or doesn't exist."
-            else:
-                return f"Error extracting transcript: {error_message}"
+            # Add a note about using sample content
+            demo_message = f"[DEMO MODE] The following is a sample transcript as the original video transcript could not be extracted:\n\n{sample_transcript}"
+            print("✓ Loaded sample transcript for demonstration", flush=True)
+            return demo_message
             
         except Exception as e:
-            error_message = str(e).lower()
-            print(f"Transcript error: {error_message}", flush=True)
-            
-            # Check error message strings since the exception types might not be directly available
-            if "no transcript" in error_message:
-                return "No transcript found for this video. The video might not have captions enabled."
-            elif "transcript is disabled" in error_message:
-                return "Transcripts are disabled for this video by the content creator."
-            elif "available transcript" in error_message:
-                return "No transcript is available in the requested language. Try a different video."
-            elif "invalid parameter" in error_message or "not found" in error_message:
-                return "Invalid YouTube video ID or video not found. Please check the URL."
-            else:
-                return f"Error extracting transcript: {str(e)}"
+            print(f"✗ Even sample transcript failed: {str(e)}", flush=True)
+            return "Unable to extract transcript from any source. Please try a different video or check your internet connection."
     
     def process_video(self, url):
         """
         Process a YouTube video by extracting its ID, information, and transcript.
+        Uses a three-tier fallback system for transcript extraction.
         
         Args:
             url (str): YouTube video URL
@@ -179,17 +192,19 @@ class VideoProcessor:
             # Get video information
             video_info = self.get_video_info(video_id)
             
-            # Extract transcript
+            # Extract transcript using three-tier fallback system
             transcript = self.extract_transcript(video_id)
             
-            # Check if transcript is an error message
-            if transcript.startswith("No transcript") or transcript.startswith("Error") or transcript.startswith("Transcript") or transcript.startswith("Invalid"):
-                print(f"Transcript issue detected: {transcript}", flush=True)
-                return video_info, transcript
-                
-            # Validate transcript
-            if not transcript or len(transcript) < 10:
-                return video_info, "No valid transcript available for this video. The video might not have captions or subtitles."
+            # Always return the transcript - it will either be:
+            # 1. Real transcript from YouTubeTranscriptApi
+            # 2. AI-generated transcript from Gemini
+            # 3. Sample transcript for demonstration
+            # 4. Error message explaining the issue
+            
+            # Validate transcript length for meaningful content
+            if transcript and len(transcript.strip()) < 10:
+                print("Warning: Very short transcript detected", flush=True)
+                # Still proceed - the sample transcript will be used for demo
             
             return video_info, transcript
         
@@ -207,9 +222,10 @@ class VideoProcessor:
             return video_info, f"Invalid YouTube URL: {error_msg}"
         
         except Exception as e:
-            # Handle other errors
+            # Handle other errors - still try to provide sample transcript for demo
             error_msg = str(e)
             print(f"Processing Error: {error_msg}", flush=True)
+            
             # Create a minimal video info for error display
             video_info = {
                 'id': 'error',
@@ -217,4 +233,11 @@ class VideoProcessor:
                 'channel': 'Error',
                 'duration': 0
             }
-            return video_info, f"Error processing video: {error_msg}"
+            
+            # Try to provide sample transcript even in error case for demonstration
+            try:
+                sample_transcript = self.load_sample_transcript()
+                demo_message = f"[DEMO MODE] Video processing encountered an error, but here's a sample transcript for demonstration:\n\nError: {error_msg}\n\nSample Content:\n{sample_transcript}"
+                return video_info, demo_message
+            except:
+                return video_info, f"Error processing video: {error_msg}"
